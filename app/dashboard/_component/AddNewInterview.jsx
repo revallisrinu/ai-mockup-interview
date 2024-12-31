@@ -27,8 +27,6 @@ const AddNewInterview = () => {
   const [loading, setLoading] = useState(false);
   const [jsonResponse, setJsonResponse] = useState([]);
  
-  
-
   const { user } = useUser();
   const router = useRouter();
 
@@ -43,76 +41,54 @@ const AddNewInterview = () => {
     }
 
     const inputPrompt =
-        `Job Position: ${jobposition}, jobDescription: ${jobdescription}, yearsOfExperience: ${yearsofExperience}. ` +
-        `Based on this information, please provide ${process.env.NEXT_PUBLIC_INTERVIEW_QUESTIONS_COUNT} ` +
-        `interview questions with answers in JSON format.`;
+    `Job Position: ${jobposition}, jobDescription: ${jobdescription}, yearsOfExperience: ${yearsofExperience}. ` +
+    `Based on this information, please provide exactly ${process.env.NEXT_PUBLIC_INTERVIEW_QUESTIONS_COUNT} ` +
+    `interview questions along with detailed answers. Ensure the response is strictly a JSON array of objects, ` +
+    `where each object has two keys: "question" and "answer". No additional text or formatting is needed.`;
+
 
     try {
-        const result = await chatSession.sendMessage(inputPrompt);
-        let responseText = await result.response.text();
+      const result = await chatSession.sendMessage(inputPrompt);
+      const rawResponse = await result.response.text();
+      console.log("Raw Response Text:", rawResponse);
 
-        const cleanResponse = responseText
-            .trim()
-            .replace(/^```json/, "")
-            .replace(/```$/, "");
+      const cleanResponse = rawResponse.replace(/```json|```/g, "");
+      const parsedResponse = JSON.parse(cleanResponse);
+      // console.log("Parsed Response:", parsedResponse);
 
-        let parsedResponse;
-        try {
-            parsedResponse = JSON.parse(cleanResponse);
-            console.log("Parsed Response:", parsedResponse);
+      const questionsArray = Array.isArray(parsedResponse)
+          ? parsedResponse
+          : parsedResponse?.interviewQuestions || [];
+      // console.log("Questions Array:", questionsArray);
 
-            // Check if parsedResponse contains 'interviewQuestions'
-            if (!parsedResponse.interviewQuestions || !Array.isArray(parsedResponse.interviewQuestions)) {
-                console.error("Expected an array under 'interviewQuestions' but received:", parsedResponse);
-                alert("The server returned data in an unexpected format.");
-                setLoading(false);
-                return;
-            }
+        setJsonResponse(questionsArray); // Store the array directly
 
-            const questionsAndAnswersArray = parsedResponse.interviewQuestions.map((item) => {
-                if (item.question && item.answer) {
-                    return { question: item.question, answer: item.answer };
-                } else {
-                    console.error("Invalid item format:", item);
-                    throw new Error("Invalid item structure in response.");
-                }
-            });
+        const resp = await db
+            .insert(MockInterview)
+            .values({
+                mockId: uuidv4(),
+                jsonMockResp: JSON.stringify(questionsArray), // Save only the array
+                jobPosition: jobposition,
+                jobDesc: jobdescription,
+                jobExperience: yearsofExperience,
+                createdBy: user?.primaryEmailAddress?.emailAddress,
+                createdAt: moment().format("DD-MM-YYYY"),
+            })
+            .returning({ mockId: MockInterview.mockId });
 
-            setJsonResponse(questionsAndAnswersArray);
+        // console.log("Inserted records:", resp);
 
-            const resp = await db
-                .insert(MockInterview)
-                .values({
-                    mockId: uuidv4(),
-                    jsonMockResp: JSON.stringify(questionsAndAnswersArray),
-                    jobPosition: jobposition,
-                    jobDesc: jobdescription,
-                    jobExperience: yearsofExperience,
-                    createdBy: user?.primaryEmailAddress?.emailAddress,
-                    createdAt: moment().format("DD-MM-YYYY"),
-                })
-                .returning({ mockId: MockInterview.mockId });
-
-            console.log("Inserted records:", resp);
-
-            if (resp && resp.length > 0 && resp[0]?.mockId) {
-                setIsopen(false);
-                router.push("/dashboard/interview/" + resp[0]?.mockId);
-            }
-        } catch (jsonError) {
-            console.error("Error parsing JSON or unexpected structure:", jsonError);
-            alert("Invalid JSON format received.");
-            setLoading(false);
-            return;
+        if (resp && resp.length > 0 && resp[0]?.mockId) {
+            setIsopen(false);
+            router.push("/dashboard/interview/" + resp[0]?.mockId);
         }
     } catch (error) {
-        console.error("Error during form submission:", error);
-        alert("Something went wrong, please try again.");
+        console.error("Error:", error);
+        alert("An error occurred while generating questions.");
     } finally {
         setLoading(false);
     }
 };
-
   
   return (
     <div>
